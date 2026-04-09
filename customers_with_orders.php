@@ -1,24 +1,52 @@
 <?php
 require_once 'connect.php';
 
-// 1. fetch all customers (n+1)
-$customersStmt = $conn->query("SELECT customer_id, name, surname, birthdate, points FROM customers");
-$customers = $customersStmt->fetchAll();
+// single query with left join to get all customers and their orders (solves n+1)
+$stmt = $conn->query("
+    select
+        c.customer_id, c.name, c.surname, c.birthdate, c.points,
+        o.order_id, o.date, o.comments, o.delivery_date, o.status
+    from customers c
+    left join orders o on c.customer_id = o.customer_id
+    order by c.customer_id, o.order_id
+");
+$rows = $stmt->fetchAll();
 
 echo "<h1>Customers and their orders</h1>\n";
 
-// loop through each customer and fetch their orders (n+1 problem - n queries)
+// group rows by customer
+$customers = [];
+foreach ($rows as $row) {
+    $id = $row['customer_id'];
+
+    if (!isset($customers[$id])) {
+        $customers[$id] = [
+            'customer_id' => $row['customer_id'],
+            'name' => $row['name'],
+            'surname' => $row['surname'],
+            'birthdate' => $row['birthdate'],
+            'points' => $row['points'],
+            'orders' => [],
+        ];
+    }
+
+    if ($row['order_id'] !== null) {
+        $customers[$id]['orders'][] = [
+            'order_id' => $row['order_id'],
+            'date' => $row['date'],
+            'comments' => $row['comments'],
+            'delivery_date' => $row['delivery_date'],
+            'status' => $row['status'],
+        ];
+    }
+}
+
 foreach ($customers as $customer) {
     echo "<h2>customer: " . htmlspecialchars($customer['name']) . " " . htmlspecialchars($customer['surname']) . "</h2>\n";
     echo "<p>birthdate: " . htmlspecialchars($customer['birthdate']) . "</p>\n";
     echo "<p>points: " . htmlspecialchars($customer['points']) . "</p>\n";
 
-    // fetch orders for this specific customer (new query for each customer)
-    $ordersStmt = $conn->prepare("SELECT order_id, date, comments, delivery_date, status FROM orders WHERE customer_id = :customer_id");
-    $ordersStmt->execute(['customer_id' => $customer['customer_id']]);
-    $orders = $ordersStmt->fetchAll();
-
-    if (count($orders) > 0) {
+    if (count($customer['orders']) > 0) {
         echo "<table border='1' cellpadding='5' cellspacing='0'>\n";
         echo "<tr>\n";
         echo "<th>order id</th>\n";
@@ -28,7 +56,7 @@ foreach ($customers as $customer) {
         echo "<th>status</th>\n";
         echo "</tr>\n";
 
-        foreach ($orders as $order) {
+        foreach ($customer['orders'] as $order) {
             echo "<tr>\n";
             echo "<td>" . htmlspecialchars($order['order_id']) . "</td>\n";
             echo "<td>" . htmlspecialchars($order['date']) . "</td>\n";
